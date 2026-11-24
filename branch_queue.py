@@ -46,3 +46,51 @@ class BranchQueue:
             raise InvalidServiceError(
                 f"Servicio '{service_type}' no válido. Opciones: {valid}."
             ) from None
+
+    def issue_ticket(self, client_name, service_type):
+        """Crea un ticket, lo encola en su servicio y lo devuelve."""
+        # Validar antes de next(): un número ya extraído del contador no se puede devolver,
+        # así que un servicio inválido no debe consumir numeración.
+        queue = self._queue_for(service_type)
+        ticket = Ticket(
+            number=next(self._counter),
+            client_name=client_name,
+            service_type=service_type,
+            issued_at=datetime.now(),
+        )
+        queue.append(ticket)
+        return ticket
+
+    def call_next(self, service_type):
+        """Retira y devuelve el ticket más antiguo del servicio."""
+        queue = self._queue_for(service_type)
+        # popleft() directo en vez de comprobar antes si la cola está vacía: la retirada es
+        # la única mutación, es atómica y ocurre antes de devolver el ticket, sin ventana
+        # entre comprobar y retirar en la que otro agente pudiera llevarse al mismo cliente.
+        try:
+            return queue.popleft()
+        except IndexError:
+            raise EmptyQueueError(
+                f"No hay clientes esperando para '{service_type}'."
+            ) from None
+
+    def peek_next(self, service_type):
+        """Devuelve el siguiente ticket del servicio sin retirarlo."""
+        queue = self._queue_for(service_type)
+        try:
+            return queue[0]
+        except IndexError:
+            raise EmptyQueueError(
+                f"No hay clientes esperando para '{service_type}'."
+            ) from None
+
+    def list_waiting(self):
+        """Devuelve {servicio: [tickets en orden de atención]} con copias de cada cola."""
+        return {service: list(queue) for service, queue in self._queues.items()}
+
+    def stats(self):
+        """Devuelve el número de clientes en espera por servicio y la clave 'total'."""
+        # len() de una deque es O(1): no recorre los tickets.
+        counts = {service: len(queue) for service, queue in self._queues.items()}
+        counts["total"] = sum(counts.values())
+        return counts
